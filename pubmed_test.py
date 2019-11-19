@@ -9,5 +9,4 @@ Created on Thu Nov 14 10:14:39 2019
 from pubmed_search import search
 
 # Test the tool
-idList, requestURL = search("alzheimers")
-print(idList)
+resultsDict, fetchResponseDict, fetchRequestURL = search("alzheimers", numResponses = 10)
