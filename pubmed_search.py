@@ -87,9 +87,9 @@ def search(query, numResponses = 100, retreived = 'all', constraints = None, pus
                             ids (list of integers). The list provided contains
                             %s """ % type(query[0]))
         idList = query
-        if len(idList) > maxNumIDs:
-            warn("Can only request up to " + str(maxNumIDs) + " IDs at once")
-            idList = idList[0:maxNumIDs]
+        if len(idList) > credentials['maxNumIDs']:
+            warn("Can only request up to " + str(credentials['maxNumIDs']) + " IDs at once")
+            idList = idList[0:credentials['maxNumIDs']]
     else:
         raise TypeError("Query must be a str (for a search term), an int (for a single document ID), or a list of ints (for a number of document IDs)")
     
@@ -124,8 +124,13 @@ def search(query, numResponses = 100, retreived = 'all', constraints = None, pus
     
     # Create a list of all resulting articles
     allData = fetchResponseDict['PubmedArticleSet']['PubmedArticle']
-    allCitationInfoLists = list(map(itemgetter('MedlineCitation'), allData))
-    allArticleDataLists = list(map(itemgetter('Article'), allCitationInfoLists))    
+    if len(idList)>1:
+        allCitationInfoLists = list(map(itemgetter('MedlineCitation'), allData))
+        allArticleDataLists = list(map(itemgetter('Article'), allCitationInfoLists))
+    else:
+        allCitationInfoLists = [allData['MedlineCitation']]
+        allArticleDataLists = [allCitationInfoLists[0]['Article']]
+        
     
     # Now that we have the results of the fetch (after a long time, probably), pull out all of the interesting information
     resultsDict = { i : {} for i in idList }
@@ -135,49 +140,33 @@ def search(query, numResponses = 100, retreived = 'all', constraints = None, pus
                 'journal': "allArticleDataLists[ind]['Journal']",
                 'title':"allArticleDataLists[ind]['ArticleTitle']",
                 'doi':"[val['#text'] for val in allData[ind]['PubmedData']['ArticleIdList']['ArticleId'] if val['@IdType'] == 'doi']",        
-                "open_src":"3", 
-                "pdf_links":"3",
-                "abstract":"3"
+                "open_src":"isOpenSource(allData[ind]['PubmedData']['ArticleIdList']['ArticleId'])", 
+                "pdf_links":"getPdfLink(allData[ind]['PubmedData']['ArticleIdList']['ArticleId'], resultsDict[ids])",
+                "abstract":"formatAbstract(allArticleDataLists[ind]['Abstract']['AbstractText'])",
                 }
     
 
         # If we need the authors, then extract all valid authors
     for ind,ids in enumerate(idList):
         for rType in retreived:
-            resultsDict[ids][rType] = eval(infoMaps[rType])
+            try:
+                resultsDict[ids][rType] = eval(infoMaps[rType])
+            except: 
+                resultsDict[ids][rType] = None
  
-               
-#        for authorList in allAuthorLists:
-#            if isinstance(authorList, OrderedDict):
-#                 # If this author list is an OrderedDict, then it's actually just an author
-##                 try:
-##                     authorList['Affiliations'] = list(authorList['AffiliationInfo'].values())
-##                     authorList.pop('AffiliationInfo')
-##                 except:
-##                     authorList['Affiliations'] = []
-#                 allAuthors.extend([authorList])
-#            else:
-#                 # If this is a list of OrderedLists, then go through each one and get the required data 
-##                 for author in authorList:
-##                     try:
-##                         author['Affiliations'] = list(author['AffiliationInfo'].values())
-##                         author.pop('AffiliationInfo')
-##                     except:
-##                         author['Affiliations'] = []
-#                 allAuthors.extend(authorList)
-#        
-#        resultsDict['authors'] = allAuthors
-        
-    # Get publication date
-                   
-#    # Get Abstract
-        # TODO: Deal with some articles not having abstracts!!!
-#    if 'abstract' in retreived:
-#        allAbstractLists = list(map(itemgetter('Abstract'), allArticleDataLists))
-#        resultsDict['abstract'] = list(map(itemgetter('AbstractText'), allAbstractLists))
-    
-    # TODO: Get open-source information, and a pdf link if possible
-    
+    # format date:
+    if 'pub_date' in retreived:
+        for ind,ids in enumerate(idList):
+            if resultsDict[ids]['pub_date'] == None:
+                try: 
+                    resultsDict[ids]['pub_date'] = allCitationInfoLists[ind]['DateRevised']
+                except: 
+                    continue
+            dateDict = resultsDict[ids]['pub_date']
+            resultsDict[ids]['pub_date'] = datetime.datetime(int(dateDict['Year']),
+                       int(dateDict['Month']),int(dateDict['Day']))
+                
+                              
     # A test for now, to see how well the function works
     return resultsDict, fetchResponseDict, fetchRequestURL
 
@@ -223,3 +212,30 @@ def createConstraintStr(constraints):
     # TODO: hundle all other constraint types
     return dateConstraintStr
     
+def getPdfLink(idList,openSource):
+    if openSource['open_src']:
+        pmcID = [val['#text'] for val in idList if val['@IdType'] == 'pmc']
+        pmcID = pmcID[0]
+        link = requests.get('https://www.ncbi.nlm.nih.gov/pmc/utils/oa/oa.fcgi?id='+pmcID)
+        if link.status_code == 200:
+            link = xmltodict.parse(link.text)
+            if 'error' in list(link['OA'].keys()) and link['OA']['error']['@code'] == 'idIsNotOpenAccess':
+                openSource['open_src'] = False
+                return None
+            try:
+                res = [val['@href'] for val in link['OA']['records']['record']['link'] if val['@format']=='pdf']
+                return res[0]
+            except:
+                return link['OA']['records']['record']['link'][0]['@href']
+
+    return None
+
+    
+def isOpenSource(idList):
+    return len([val['#text'] for val in idList if val['@IdType'] == 'pmc'])>0
+            
+def formatAbstract(abstract):
+    if isinstance(abstract,dict):
+        return abstract['#text']
+    else:
+        return abstract

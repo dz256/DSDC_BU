@@ -9,4 +9,4 @@ Created on Thu Nov 14 10:14:39 2019
 from pubmed_search import search
 
 # Test the tool
-resultsDict, fetchResponseDict, fetchRequestURL = search("alzheimers", numResponses = 10)
+resultsDict, fetchResponseDict, fetchRequestURL = search([11158633,31760027,28298962], numResponses = 1)
