@@ -1,2 +1,3 @@
 *.agdai
 configure.py
+.DS_Store
